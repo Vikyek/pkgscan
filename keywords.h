@@ -41,11 +41,10 @@ struct flagables keyphrases[] = {
     {"openssl enc",                8},
     {"xxd -r",                     8},
 
-    // Checksum skips & tampering (Weight: 8)
-    {"md5sums=('SKIP')",           8},
-    {"sha256sums=('SKIP')",        8},
+    // Checksum tampering (empty sums) (Weight: 8)
     {"md5sums=('')",               8},
     {"sha256sums=('')",            8},
+    {"b2sums=('')",                8},
 
     // Pirated / sketchy indicators (Weight: 4-5)
     {"-patched",                   3},
