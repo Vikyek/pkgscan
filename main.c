@@ -20,7 +20,7 @@
 #define CYAN    "\033[36m"
 #define BOLD    "\033[1m"
 
-#define LINE_LENGTH 256
+#define LINE_LENGTH 4096
 
 char s[LINE_LENGTH];
 
@@ -818,18 +818,55 @@ void do_install(char *pkg, char *clone_dir) {
         printf("Installation of '%s' failed.\n", pkg);
 }
 
+static int is_in_comment(const char *line, const char *match_pos) {
+    int in_single = 0, in_double = 0;
+    for (const char *p = line; p < match_pos; p++) {
+        if (*p == '\'' && !in_double) in_single = !in_single;
+        else if (*p == '"' && !in_single) in_double = !in_double;
+        else if (*p == '#' && !in_single && !in_double) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int parser(FILE *file, char *s) {
     int danger = 0;
     int keywordsfound = 0;
     int linecount = 1;
 
     while (fgets(s, LINE_LENGTH, file) != NULL) {
+        // Strip leading whitespace to quickly check if whole line is a comment
+        const char *trimmed = s;
+        while (*trimmed && isspace((unsigned char)*trimmed)) trimmed++;
+        if (*trimmed == '#' || *trimmed == '\0') {
+            linecount++;
+            continue;
+        }
+
         for (int i = 0; i < num_keywords; i++) {
-            if (strstr(s, keyphrases[i].strings) != NULL) {
+            const char *search_str = keyphrases[i].strings;
+            const char *match = strstr(s, search_str);
+            while (match != NULL) {
+                // Ignore matches that fall inside shell comments
+                if (is_in_comment(s, match)) {
+                    break;
+                }
+
+                // Word boundary check: ensure keyword is not a suffix of an identifier
+                if (match > s) {
+                    char prev = *(match - 1);
+                    if (isalnum((unsigned char)prev) || prev == '_') {
+                        match = strstr(match + 1, search_str);
+                        continue;
+                    }
+                }
+
                 keywordsfound += 1;
                 danger += keyphrases[i].warning_lvl;
                 printf(YELLOW "  [Line %i] Matched: '%s' (weight: %i)\n" RESET,
-                linecount, keyphrases[i].strings, keyphrases[i].warning_lvl);
+                       linecount, keyphrases[i].strings, keyphrases[i].warning_lvl);
+                break;
             }
         }
         if (keywordsfound > 0) {
@@ -837,6 +874,7 @@ int parser(FILE *file, char *s) {
         }
         keywordsfound = 0;
         linecount += 1;
+
         int b64_len = 0;
         int has_b64_chars = 0;
         for (int j = 0; s[j]; j++) {
@@ -848,9 +886,14 @@ int parser(FILE *file, char *s) {
             if (s[j] == '+' || s[j] == '/') has_b64_chars = 1;
             if (b64_len > 50 && has_b64_chars &&
                 strstr(s, "sha256sums") == NULL &&
+                strstr(s, "b2sums") == NULL &&
+                strstr(s, "sha512sums") == NULL &&
                 strstr(s, "md5sums") == NULL) {
-                printf(YELLOW "  Possible base64 payload detected on line %i\n" RESET, linecount);
-                danger += 7;
+                // Ensure base64 string is not inside a comment
+                if (!is_in_comment(s, &s[j - b64_len])) {
+                    printf(YELLOW "  Possible base64 payload detected on line %i\n" RESET, linecount);
+                    danger += 7;
+                }
                 break;
             }
         }
